@@ -45,6 +45,7 @@ export function CopilotModal() {
   const [status, setStatus]             = useState('')
   const scrollRef = useRef(null)
   const meetingUtterancesRef = useRef([])
+  const lastCoachedIndexRef = useRef(0)
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -103,79 +104,6 @@ export function CopilotModal() {
     }
   }, [formatTranscriptText, isClientUtterance])
 
-  const generateCoaching = useCallback(async (utterances = pendingCoachingUtterances) => {
-    if (!utterances || utterances.length === 0) return
-
-    const hasClientSpeech = utterances.some(isClientUtterance)
-    if (!hasClientSpeech) {
-      setError('No client speech is ready to coach yet.')
-      return
-    }
-
-    setIsProcessing(true)
-    setError(null)
-    setStatus('Generating suggestions...')
-
-    const turnId = Date.now()
-    const meetingTranscriptFromStart = meetingUtterancesRef.current.length > 0
-      ? meetingUtterancesRef.current
-      : utterances
-    setTurns(prev => [...prev, { id: turnId, utterances: [], suggestion: '', isStreaming: true }])
-
-    try {
-      const analyzeRes = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ utterances, meetingTranscriptFromStart, history, speakerMap, missionBrief }),
-      })
-
-      if (!analyzeRes.ok) {
-        const err = await analyzeRes.json()
-        setError(err.error || 'Analysis failed')
-        setTurns(prev => prev.map(t => t.id === turnId ? { ...t, isStreaming: false } : t))
-        setIsProcessing(false); setStatus(''); return
-      }
-
-      let accumulated = ''
-      const reader = analyzeRes.body.getReader()
-      const decoder = new TextDecoder()
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6).trim()
-          if (data === '[DONE]') {
-            setTurns(prev => prev.map(t =>
-              t.id === turnId ? { ...t, suggestion: accumulated, isStreaming: false } : t
-            ))
-            const transcriptText = formatTranscriptText(utterances)
-            setHistory(prev => [
-              ...prev,
-              { role: 'user', content: transcriptText },
-              { role: 'assistant', content: accumulated },
-            ])
-            setPendingCoachingUtterances([])
-            setIsProcessing(false); setStatus(''); return
-          }
-          try {
-            const parsed = JSON.parse(data)
-            if (parsed.text) {
-              accumulated += parsed.text
-              setTurns(prev => prev.map(t =>
-                t.id === turnId ? { ...t, suggestion: accumulated } : t
-              ))
-            }
-          } catch (_) {}
-        }
-      }
-    } catch (err) {
-      setError(err.message)
-      setIsProcessing(false); setStatus('')
-    }
-  }, [formatTranscriptText, history, isClientUtterance, missionBrief, pendingCoachingUtterances, speakerMap])
-
   const splitSpeakersIfNeeded = useCallback(async (utterances) => {
     if (!utterances || utterances.length !== 1) return utterances
 
@@ -209,6 +137,86 @@ export function CopilotModal() {
     onTurn: handleLiveTurn,
   })
 
+  const generateCoaching = useCallback(async (utterancesOverride) => {
+    const clientPartial = partialTranscript.filter(isClientUtterance)
+    const sinceLastCoach = meetingUtterancesRef.current.slice(lastCoachedIndexRef.current)
+    const utterances = utterancesOverride ?? mergeConsecutiveUtterances(
+      sinceLastCoach.length > 0 ? sinceLastCoach : [...pendingCoachingUtterances],
+      clientPartial
+    )
+    if (!utterances || utterances.length === 0) return
+
+    const hasClientSpeech = utterances.some(isClientUtterance)
+    if (!hasClientSpeech) return
+
+    setIsProcessing(true)
+    setError(null)
+    setStatus('Generating suggestions...')
+
+    const turnId = Date.now()
+    const fullContext = mergeConsecutiveUtterances(meetingUtterancesRef.current, partialTranscript)
+    const meetingTranscriptFromStart = fullContext.length > 0 ? fullContext : utterances
+    setTurns(prev => [...prev, { id: turnId, utterances: [], suggestion: '', isStreaming: true }])
+
+    try {
+      const analyzeRes = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ utterances, meetingTranscriptFromStart, history, speakerMap, missionBrief }),
+      })
+
+      if (!analyzeRes.ok) {
+        const err = await analyzeRes.json()
+        setError(err.error || 'Analysis failed')
+        setTurns(prev => prev.map(t => t.id === turnId ? { ...t, isStreaming: false } : t))
+        setIsProcessing(false); setStatus(''); return
+      }
+
+      let accumulated = ''
+      const reader = analyzeRes.body.getReader()
+      const decoder = new TextDecoder()
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        for (const line of decoder.decode(value).split('\n')) {
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6).trim()
+          if (data === '[DONE]') {
+            setTurns(prev => prev.map(t =>
+              t.id === turnId ? { ...t, suggestion: accumulated, isStreaming: false } : t
+            ))
+            setHistory(prev => [...prev, { role: 'assistant', content: accumulated }])
+            lastCoachedIndexRef.current = meetingUtterancesRef.current.length
+            setPendingCoachingUtterances([])
+            setIsProcessing(false); setStatus(''); return
+          }
+          try {
+            const parsed = JSON.parse(data)
+            if (parsed.replace) {
+              accumulated = parsed.replace
+              setTurns(prev => prev.map(t =>
+                t.id === turnId ? { ...t, suggestion: accumulated } : t
+              ))
+            } else if (parsed.text) {
+              accumulated += parsed.text
+              setTurns(prev => prev.map(t =>
+                t.id === turnId ? { ...t, suggestion: accumulated } : t
+              ))
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (err) {
+      setError(err.message)
+      setIsProcessing(false); setStatus('')
+    }
+  }, [formatTranscriptText, history, isClientUtterance, missionBrief, partialTranscript, pendingCoachingUtterances, speakerMap])
+
+  const clientPartialUtterances = partialTranscript.filter(isClientUtterance)
+  const hasClientSpeechReady = pendingCoachingUtterances.length > 0 || clientPartialUtterances.length > 0
+  const generateEnabled = isRecording || hasClientSpeechReady
+
   const handleSpeakerChange = useCallback((speaker, name) => {
     setSpeakerMap(prev => ({ ...prev, [speaker]: name }))
   }, [])
@@ -229,7 +237,7 @@ export function CopilotModal() {
         <div className="flex-shrink-0 flex items-center gap-2 px-5 py-4 bg-slate-900 select-none">
           <div className={`w-2 h-2 rounded-full ${isRecording ? 'bg-red-400 listening-ring' : isProcessing ? 'bg-amber-400 listening-ring' : 'bg-slate-500'}`} />
           <span className="text-white text-sm font-medium flex-1">
-            Meeting Copilot
+            AI Earpiece
             {isRecording && <span className="text-red-300 text-xs ml-2">● Listening</span>}
             {isProcessing && !isRecording && <span className="text-amber-300 text-xs ml-2">● Processing</span>}
           </span>
@@ -245,7 +253,7 @@ export function CopilotModal() {
             )}
             {turns.length > 0 && (
               <button
-                onClick={() => { meetingUtterancesRef.current = []; setPendingCoachingUtterances([]); setTurns([]); setHistory([]); setSpeakers([]); setSpeakerMap({}); setError(null) }}
+                onClick={() => { meetingUtterancesRef.current = []; lastCoachedIndexRef.current = 0; setPendingCoachingUtterances([]); setTurns([]); setHistory([]); setSpeakers([]); setSpeakerMap({}); setError(null) }}
                 className="text-slate-400 hover:text-white text-xs px-2 py-1 rounded transition-colors"
               >
                 Clear
@@ -278,7 +286,7 @@ export function CopilotModal() {
                 <div className="flex items-center justify-between mb-2">
                   <div>
                     <p className="text-xs font-semibold text-slate-600">Mission Brief</p>
-                    <p className="text-[11px] text-slate-400">Optional context for more relevant coaching.</p>
+                    <p className="text-[11px] text-slate-400">Context about the client company and project you are pitching.</p>
                   </div>
                   <button
                     onClick={() => setShowMissionBrief(false)}
@@ -292,14 +300,14 @@ export function CopilotModal() {
                     type="text"
                     value={missionBrief.clientName}
                     onChange={e => setMissionBrief(prev => ({ ...prev, clientName: e.target.value }))}
-                    placeholder="Client name"
+                    placeholder="Client contact name"
                     className="text-xs border border-slate-200 rounded-lg px-2 py-2 outline-none focus:border-slate-400 bg-white"
                   />
                   <input
                     type="text"
                     value={missionBrief.company}
                     onChange={e => setMissionBrief(prev => ({ ...prev, company: e.target.value }))}
-                    placeholder="Company"
+                    placeholder="Client company"
                     className="text-xs border border-slate-200 rounded-lg px-2 py-2 outline-none focus:border-slate-400 bg-white"
                   />
                 </div>
@@ -307,13 +315,13 @@ export function CopilotModal() {
                   type="text"
                   value={missionBrief.meetingAbout}
                   onChange={e => setMissionBrief(prev => ({ ...prev, meetingAbout: e.target.value }))}
-                  placeholder="What is this meeting about?"
+                  placeholder="e.g. website redesign, custom app, integration..."
                   className="mt-2 w-full text-xs border border-slate-200 rounded-lg px-2 py-2 outline-none focus:border-slate-400 bg-white"
                 />
                 <textarea
                   value={missionBrief.background}
                   onChange={e => setMissionBrief(prev => ({ ...prev, background: e.target.value }))}
-                  placeholder="Background, goals, constraints, things the AI should know..."
+                  placeholder="Their pain points, current site/system, budget signals, competitors..."
                   rows={2}
                   className="mt-2 w-full resize-none text-xs border border-slate-200 rounded-lg px-2 py-2 outline-none focus:border-slate-400 bg-white"
                 />
@@ -369,9 +377,9 @@ export function CopilotModal() {
                       <line x1="12" y1="19" x2="12" y2="22"/>
                     </svg>
                   </div>
-                  <p className="text-sm text-slate-500 font-medium">Ready for your meeting</p>
-                  <p className="text-xs text-slate-400 mt-1">Press mic once · share the meeting tab/window with audio</p>
-                  <p className="text-xs text-slate-300 mt-0.5">Boss mic and client audio are captured separately</p>
+                  <p className="text-sm text-slate-500 font-medium">Ready to pitch</p>
+                  <p className="text-xs text-slate-400 mt-1">Press mic · share the client&apos;s meeting tab with audio</p>
+                  <p className="text-xs text-slate-300 mt-0.5">You = our team · Client = the company we are selling to</p>
                 </div>
               )}
 
@@ -425,8 +433,10 @@ export function CopilotModal() {
             {/* Footer */}
             <div className="flex-shrink-0 px-4 py-3 border-t border-slate-100 flex items-center justify-between bg-slate-50">
               <div className="text-xs text-slate-400">
-                {pendingCoachingUtterances.length > 0
-                  ? `${pendingCoachingUtterances.length} client part${pendingCoachingUtterances.length !== 1 ? 's' : ''} ready`
+                {hasClientSpeechReady
+                  ? `${pendingCoachingUtterances.length + clientPartialUtterances.length} client part${pendingCoachingUtterances.length + clientPartialUtterances.length !== 1 ? 's' : ''} ready${clientPartialUtterances.length > 0 && pendingCoachingUtterances.length === 0 ? ' (live)' : ''}`
+                  : isRecording
+                  ? 'Listening — Generate when client speaks'
                   : speakers.length > 0
                   ? `${speakers.length} speaker${speakers.length !== 1 ? 's' : ''} · ${turns.length} exchange${turns.length !== 1 ? 's' : ''}`
                   : 'Powered by AssemblyAI + GPT-4o'
@@ -435,9 +445,9 @@ export function CopilotModal() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => generateCoaching()}
-                  disabled={isProcessing || pendingCoachingUtterances.length === 0}
+                  disabled={isProcessing || !generateEnabled}
                   className="px-3 py-2 bg-emerald-600 text-white text-xs font-semibold rounded-full disabled:opacity-40 disabled:cursor-not-allowed hover:bg-emerald-500 transition-colors"
-                  title="Generate what to say next from the client speech so far"
+                  title="Generate what to say next — active while listening; only responds to client speech"
                 >
                   Generate
                 </button>

@@ -5,8 +5,8 @@ export default function Home() {
   return (
     <>
       <Head>
-        <title>Meeting Copilot</title>
-        <meta name="description" content="Real-time AI meeting assistant" />
+        <title>AI Earpiece</title>
+        <meta name="description" content="Live sales coaching for software and web development client calls" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
 
@@ -20,10 +20,10 @@ export default function Home() {
         <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-6xl flex-col gap-6">
           <header className="flex flex-col gap-3 text-white sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-sm font-medium text-cyan-200">Real-time meeting assistant</p>
-              <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Meeting Copilot</h1>
+              <p className="text-sm font-medium text-cyan-200">Win more software & website projects</p>
+              <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">AI Earpiece</h1>
               <p className="mt-2 max-w-2xl text-sm text-slate-300">
-                Keep this page open during your meeting. Press the mic once to start live transcription and AI suggestions.
+                Real-time coaching while you sell custom software and website redesigns to client companies. Press the mic once to start.
               </p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">

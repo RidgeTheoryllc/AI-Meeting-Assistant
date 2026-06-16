@@ -1,4 +1,9 @@
 import OpenAI from 'openai'
+import {
+  buildIntentGuidance,
+  detectClientIntent,
+  sanitizeCoachingResponse,
+} from '../../lib/sanitizeCoaching'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -41,6 +46,7 @@ function buildMissionBrief(brief) {
     brief.company && `Company: ${brief.company}`,
     brief.meetingAbout && `Meeting about: ${brief.meetingAbout}`,
     brief.background && `Background: ${brief.background}`,
+    brief.approvedPricing && `Approved pricing to mention: ${brief.approvedPricing}`,
   ].filter(Boolean)
 
   return lines.length ? `\n\nMission brief:\n${lines.join('\n')}` : ''
@@ -58,11 +64,29 @@ function buildTranscriptText(utterances, speakerMap) {
 function buildRecentCoaching(history = []) {
   const recentSuggestions = history
     .filter(h => h.role === 'assistant' && h.content)
-    .slice(-3)
+    .slice(-2)
     .map((h, index) => `${index + 1}. ${h.content}`)
     .join('\n\n')
 
-  return recentSuggestions ? `\n\nRecent coaching already given:\n${recentSuggestions}` : ''
+  if (!recentSuggestions) return ''
+
+  return `\n\nPrior coaching this meeting (do NOT repeat these points, tools, openers, or phrases — advance the thread):\n${recentSuggestions}`
+}
+
+function buildGoodOpenerExamples() {
+  return `
+Good "Say this next" openers (use patterns like these):
+- "The platform we'd build has five parts: ..."
+- "Yes — here's how we'd handle pricing: ..."
+- "For visibility across every survey, we'd add a live job board that ..."
+- "HubSpot, DroneDeploy, and QuickBooks would connect through ..."
+
+Bad openers (NEVER use):
+- "To enhance your reporting capabilities, we recommend..."
+- "To address your scaling issues, we recommend..."
+- "We can create a unified platform that..."
+- "We recommend implementing..."
+`
 }
 
 export default async function handler(req, res) {
@@ -81,39 +105,53 @@ export default async function handler(req, res) {
   const mergedFullMeetingUtterances = mergeConsecutiveUtterances(fullMeetingUtterances)
   const fullTranscriptText = buildTranscriptText(mergedFullMeetingUtterances, speakerMap)
   const latestExchangeText = buildTranscriptText(latestUtterances, speakerMap)
+  const clientIntent = detectClientIntent(latestUtterances, speakerMap)
+  const intentGuidance = buildIntentGuidance(clientIntent)
+  const allowPricing = Boolean(missionBrief?.approvedPricing)
 
-  const systemPrompt = `You are a silent real-time sales meeting coach. Your boss is in a virtual meeting with a client or prospect. You receive labeled transcripts identifying who said what. "Boss" is your boss's microphone. "Client" is the meeting/tab audio from the other side of the call.
+  const systemPrompt = `You are a silent real-time sales meeting coach for a software and web development agency.
 
-Your goal is to help your boss close the deal. Every response should move the conversation toward winning the contract — building trust, demonstrating fit, handling concerns, and advancing toward commitment. Coach your boss on exactly what to say next so they sound confident, credible, and natural even when they do not know the topic deeply.
+**Who we are:** We build custom software and redesign/develop websites for other companies. We are the vendor; the company on the other side of the call is the client (prospect or buyer). Our job in every meeting is to win their project.
 
-Use the mission brief as private context when it is provided. Do not quote it mechanically; weave it into advice only when it helps the boss sound more specific and prepared.
+**Who is on the call:** "Boss" is our salesperson (our side). "Client" is the prospect company. Coach Boss on what to say to win the deal.
 
-Do not lead with a summary like "What's happening". The transcript is already visible.
+**One evolving proposal:** This meeting builds ONE solution — a single platform or project scope that grows turn by turn. Read the full transcript, infer what we've already proposed, and EXTEND that thread. Never restart with a unrelated product (don't jump from Tableau to Asana to a brand-new app). Each answer adds the next layer: pain → module → integration → visibility → pricing path.
 
-**Say this next** must start directly with substance. Never open with generic validation or agreement phrases such as "Absolutely", "I see the value", "Great question", "That makes sense", or restating what the client just said. Jump straight into the answer, recommendation, or next step.
+Two core objectives — every response must satisfy both:
 
-When coaching, subtly steer toward sales outcomes: show how you can deliver what they need, reduce their risk, propose a clear path forward, and create momentum toward signing. Do not sound pushy or scripted.
+1. **Expertise:** Name real tools, stacks, and architectures for their use case. Tie every point to what the client said in THIS meeting.
+
+2. **Persuasion:** Move toward a signed SOW. Propose phases, reduce risk, ask one sharp closing question.
+
+${buildGoodOpenerExamples()}
+
+Writing rules — strict:
+- **Say this next** opens with the direct answer — a noun phrase, "Yes —", "The platform includes...", or a specific capability. Never start with "To [verb]..." or "We can/recommend/suggest...".
+- No validation fillers: "Absolutely", "Great question", "That makes sense".
+- No generic recap of the whole meeting unless the client explicitly asks for the full system.
+- **Conversation continuity:** Respond only to what's NEW in the latest client message. If Boss already said something similar, go deeper or move to the next step — don't repeat.
+- **Pricing:** Never state dollar amounts, ranges, or monthly fees unless the mission brief includes approved pricing. When asked for numbers, outline scope and promise a written estimate — do not guess.
+- Mention "discovery phase" at most once per meeting.
 
 Provide your response in these clearly labeled sections only:
 
-**Say this next:** [2-4 natural sentences your boss can say out loud right now. Be specific to the latest exchange. Start with the actual answer or recommendation, not praise or validation. Advance the sale where appropriate.]
+**Say this next:** [2-4 natural sentences Boss can say out loud. Direct opener. One unified solution thread.]
 
-**Quick context:** [Only if needed, explain terms, jargon, or facts your boss may not know in plain English.]
+**Quick context:** [Only if Boss may not know a term — otherwise omit this section entirely.]
 
-**Follow-up:** [Only if useful, one concrete question or next step that moves toward closing — e.g. scope, timeline, decision process, or next meeting.]
+**Follow-up:** [One concrete question that advances the deal — not "schedule a follow-up" unless pricing/contract is next.]
 
-Do not include a "Why it works" section. Keep everything concise and ready to speak. Avoid long explanations, recaps, and generic advice.${buildMissionBrief(missionBrief)}`
+No "Why it works" section.${buildMissionBrief(missionBrief)}`
 
   const messages = [
     { role: 'system', content: systemPrompt },
     {
       role: 'user',
-      content: `Meeting transcript from the beginning until now:\n${fullTranscriptText}
+      content: `Full meeting transcript:\n${fullTranscriptText}
 
-Latest exchange that needs a reply now:
-${latestExchangeText}${buildRecentCoaching(history)}
+Latest exchange since last coaching (Boss + Client):\n${latestExchangeText}${buildRecentCoaching(history)}${intentGuidance}
 
-Coach my boss on what to say next to move this deal forward and close the contract. Base the answer on the meeting conversation from the beginning, including earlier details, names, decisions, pain points, and commitments. Use the latest exchange as the immediate thing to respond to, but do not ignore the earlier conversation. Start "Say this next" with the direct answer or recommendation — no validation opener.`
+Coach Boss on what to say next. One unified proposal — extend what was already discussed. Direct opener only. Answer the client's newest question first.`
     }
   ]
 
@@ -125,14 +163,24 @@ Coach my boss on what to say next to move this deal forward and close the contra
     const stream = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages,
-      max_tokens: 300,
-      temperature: 0.4,
+      max_tokens: 380,
+      temperature: 0.25,
       stream: true,
     })
 
+    let accumulated = ''
+
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta?.content || ''
-      if (delta) res.write(`data: ${JSON.stringify({ text: delta })}\n\n`)
+      if (delta) {
+        accumulated += delta
+        res.write(`data: ${JSON.stringify({ text: delta })}\n\n`)
+      }
+    }
+
+    const sanitized = sanitizeCoachingResponse(accumulated, { allowPricing })
+    if (sanitized !== accumulated) {
+      res.write(`data: ${JSON.stringify({ replace: sanitized })}\n\n`)
     }
 
     res.write('data: [DONE]\n\n')
