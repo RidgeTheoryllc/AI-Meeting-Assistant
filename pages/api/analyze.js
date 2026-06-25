@@ -6,18 +6,22 @@ import {
 } from '../../lib/sanitizeCoaching'
 import { buildSystemPrompt, getKnowledgeContextForSanitize } from '../../lib/buildAnalyzePrompt'
 import { findRelevantProjects, getKnowledgeCompanyNames, getAllowedSheetPrices } from '../../lib/knowledgeHelpers'
+import { fetchWebsiteSnippet } from '../../lib/fetchWebsiteSnippet'
+import { buildProspectFactContext } from '../../lib/prospectAttribution'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
 function getSpeakerLabel(speaker, speakerMap) {
   if (speakerMap?.[speaker]) return speakerMap[speaker]
-  if (speaker === 'Boss' || speaker === 'Client') return speaker
+  if (speaker === 'You' || speaker === 'Boss' || speaker === 'Client') {
+    return speaker === 'Boss' ? 'You' : speaker
+  }
   return `Speaker ${speaker}`
 }
 
 function isClientUtterance(utterance, speakerMap) {
   const label = getSpeakerLabel(utterance?.speaker, speakerMap).trim().toLowerCase()
-  if (utterance?.speaker === 'Boss' || label === 'boss') return false
+  if (utterance?.speaker === 'You' || utterance?.speaker === 'Boss' || label === 'boss' || label === 'you') return false
   return utterance?.speaker === 'Client' || label === 'client' || Boolean(utterance?.speaker)
 }
 
@@ -73,6 +77,7 @@ function buildRecentCoaching(history = []) {
   if (/\bwhat specific features\b/i.test(priorSay)) {
     digest.push('- Portal feature question already asked — ask something new.')
   }
+  digest.push('- Portfolio names are past clients we built for — never the prospect\'s systems.')
 
   const digestBlock = digest.length ? `\nAlready covered (do NOT repeat):\n${digest.join('\n')}` : ''
 
@@ -88,6 +93,7 @@ function collectSanitizeOptions(knowledge, brief, contextText, fullTranscriptTex
   const allowedNames = getKnowledgeContextForSanitize(knowledge)
   const sheetPrices = getAllowedSheetPrices(knowledge, relevant, `${contextText}\n${fullTranscriptText}`)
   const clientStatedPrices = extractClientStatedPrices(fullTranscriptText)
+  const factContext = buildProspectFactContext(fullTranscriptText, brief)
 
   return {
     allowPricing: Boolean(clientIntent.askingPrice || clientIntent.clientStatedBudget),
@@ -97,8 +103,11 @@ function collectSanitizeOptions(knowledge, brief, contextText, fullTranscriptTex
     alreadyStatedDeadlinePitch: Boolean(clientIntent.alreadyStatedDeadlinePitch),
     alreadyStatedAccountLead: Boolean(clientIntent.alreadyStatedAccountLead),
     allowedNames,
+    portfolioNames: allowedNames,
+    factContext,
     fallbackNames: getKnowledgeCompanyNames(relevant),
     clientCompany: brief?.clientCompany || '',
+    clientRejectedTmsReplacement: Boolean(clientIntent.clientRejectedTmsReplacement),
     documentedPrices: sheetPrices,
     clientStatedPrices,
     history,
@@ -131,7 +140,19 @@ export default async function handler(req, res) {
   const mergedFullMeetingUtterances = mergeConsecutiveUtterances(fullMeetingUtterances)
   const fullTranscriptText = buildTranscriptText(mergedFullMeetingUtterances, speakerMap)
   const latestExchangeText = buildTranscriptText(latestUtterances, speakerMap)
-  const contextText = `${fullTranscriptText}\n${brief?.background || ''}\n${brief?.meetingGoal || ''}`
+
+  let enrichedBrief = { ...brief }
+  if (brief?.clientWebsite && !brief?.websiteSnippet) {
+    const websiteSnippet = await fetchWebsiteSnippet(brief.clientWebsite)
+    if (websiteSnippet) enrichedBrief = { ...enrichedBrief, websiteSnippet }
+  }
+
+  const contextText = [
+    fullTranscriptText,
+    enrichedBrief?.priorConversations,
+    enrichedBrief?.websiteSnippet,
+    enrichedBrief?.clientCompany,
+  ].filter(Boolean).join('\n')
 
   const clientIntent = detectClientIntent(latestUtterances, speakerMap, {
     fullMeetingUtterances: mergedFullMeetingUtterances,
@@ -139,8 +160,8 @@ export default async function handler(req, res) {
   })
   const intentGuidance = buildIntentGuidance(clientIntent)
 
-  const systemPrompt = buildSystemPrompt({ company, brief, knowledge, contextText })
-  const sanitizeOptions = collectSanitizeOptions(knowledge, brief, contextText, fullTranscriptText, clientIntent, history)
+  const systemPrompt = buildSystemPrompt({ company, brief: enrichedBrief, knowledge, contextText })
+  const sanitizeOptions = collectSanitizeOptions(knowledge, enrichedBrief, contextText, fullTranscriptText, clientIntent, history)
 
   const messages = [
     { role: 'system', content: systemPrompt },
@@ -148,9 +169,9 @@ export default async function handler(req, res) {
       role: 'user',
       content: `Full meeting transcript:\n${fullTranscriptText}
 
-Latest exchange since last coaching (Boss + Client):\n${latestExchangeText}${buildRecentCoaching(history)}${intentGuidance}
+Latest exchange since last coaching (You + Client):\n${latestExchangeText}${buildRecentCoaching(history)}${intentGuidance}
 
-Coach Boss on what to say next. Answer ONLY what is NEW in the client's latest message. If price was already stated in prior coaching, do not repeat it unless they asked price again. If client asked for price for the first time, state spreadsheet-backed dollar amounts. One unified proposal — extend what was already discussed. Direct opener only. Two sections only: Say this next and Follow-up.`,
+Coach the salesperson (You) on what to say next. NEVER attribute spreadsheet portfolio names as the prospect's systems or needs unless the client said them in the transcript or brief. Answer ONLY what is NEW in the client's latest message. Two sections only: Say this next and Follow-up.`,
     },
   ]
 

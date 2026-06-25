@@ -13,7 +13,7 @@ export function getSpeakerColor(speakerKey) {
 }
 
 export function getSpeakerInitial(speaker) {
-  if (speaker === 'Boss') return 'B'
+  if (speaker === 'You' || speaker === 'Boss') return 'Y'
   if (speaker === 'Client') return 'C'
   return speaker
 }

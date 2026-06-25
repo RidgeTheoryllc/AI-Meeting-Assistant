@@ -9,7 +9,9 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
 function getSpeakerLabel(speaker, speakerMap) {
   if (speakerMap?.[speaker]) return speakerMap[speaker]
-  if (speaker === 'Boss' || speaker === 'Client') return speaker
+  if (speaker === 'You' || speaker === 'Boss' || speaker === 'Client') {
+    return speaker === 'Boss' ? 'You' : speaker
+  }
   return `Speaker ${speaker}`
 }
 
@@ -62,7 +64,7 @@ export default async function handler(req, res) {
 
     const merged = mergeConsecutiveUtterances(fullMeetingUtterances)
     const fullTranscriptText = buildTranscriptText(merged, speakerMap)
-    const contextText = `${fullTranscriptText}\n${brief?.background || ''}\n${brief?.meetingGoal || ''}`
+    const contextText = `${fullTranscriptText}\n${brief?.priorConversations || ''}`
 
     const systemPrompt = buildSystemPrompt({ company, brief, knowledge, contextText })
 

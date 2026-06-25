@@ -1,7 +1,8 @@
 import { SpeakerTag, getSpeakerColor, getSpeakerInitial } from './SpeakerTag'
 
 export function getDefaultSpeakerLabel(speaker) {
-  if (speaker === 'Boss' || speaker === 'Client') return speaker
+  if (speaker === 'You' || speaker === 'Boss') return 'You'
+  if (speaker === 'Client') return speaker
   return `Speaker ${speaker}`
 }
 

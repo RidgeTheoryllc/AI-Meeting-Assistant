@@ -8,13 +8,24 @@ import { SpeakerMapEditor } from './SpeakerMapEditor'
 const BRIEF_STORAGE_KEY = 'aiEarpiece_brief'
 const EMPTY_BRIEF = {
   clientCompany: '',
-  meetingType: '',
-  meetingGoal: '',
-  background: '',
+  clientWebsite: '',
+  priorConversations: '',
 }
 
-function generateMeetingId() {
-  return Math.random().toString(36).substring(2, 10).toUpperCase()
+function loadBriefFromStorage() {
+  if (typeof window === 'undefined') return EMPTY_BRIEF
+  try {
+    const saved = localStorage.getItem(BRIEF_STORAGE_KEY)
+    if (!saved) return EMPTY_BRIEF
+    const parsed = JSON.parse(saved)
+    const priorConversations = [parsed.priorConversations, parsed.background]
+      .map(s => s?.trim())
+      .filter(Boolean)
+      .join('\n\n')
+    return { ...EMPTY_BRIEF, ...parsed, priorConversations }
+  } catch (_) {
+    return EMPTY_BRIEF
+  }
 }
 
 function mergeConsecutiveUtterances(existing = [], incoming = []) {
@@ -36,15 +47,8 @@ function mergeConsecutiveUtterances(existing = [], incoming = []) {
   return merged
 }
 
-function loadBriefFromStorage() {
-  if (typeof window === 'undefined') return EMPTY_BRIEF
-  try {
-    const saved = localStorage.getItem(BRIEF_STORAGE_KEY)
-    if (!saved) return EMPTY_BRIEF
-    return { ...EMPTY_BRIEF, ...JSON.parse(saved) }
-  } catch (_) {
-    return EMPTY_BRIEF
-  }
+function generateMeetingId() {
+  return Math.random().toString(36).substring(2, 10).toUpperCase()
 }
 
 const COMPANY_LABELS = {
@@ -107,7 +111,7 @@ export function CopilotModal() {
 
   const isClientUtterance = useCallback((utterance) => {
     const label = getSpeakerLabel(utterance?.speaker).trim().toLowerCase()
-    if (utterance?.speaker === 'Boss' || label === 'boss') return false
+    if (utterance?.speaker === 'You' || utterance?.speaker === 'Boss' || label === 'boss' || label === 'you') return false
     return utterance?.speaker === 'Client' || label === 'client' || Boolean(utterance?.speaker)
   }, [getSpeakerLabel])
 
@@ -151,7 +155,7 @@ export function CopilotModal() {
     if (!utterances || utterances.length !== 1) return utterances
 
     const [utterance] = utterances
-    if (utterance.speaker === 'Boss' || utterance.speaker === 'Client') return utterances
+    if (utterance.speaker === 'You' || utterance.speaker === 'Boss' || utterance.speaker === 'Client') return utterances
     if (!utterance?.text || utterance.text.split(/\s+/).length < 10) return utterances
 
     try {
@@ -180,10 +184,10 @@ export function CopilotModal() {
     onTurn: handleLiveTurn,
   })
 
-  const fetchKnowledge = useCallback(async (selectedCompany) => {
+  const fetchKnowledge = useCallback(async () => {
     setKnowledgeLoading(true)
     try {
-      const res = await fetch(`/api/sheets/knowledge?company=${selectedCompany}`)
+      const res = await fetch('/api/sheets/knowledge?company=all')
       const data = await res.json()
       setKnowledge(data.knowledge || [])
     } catch (_) {
@@ -211,7 +215,7 @@ export function CopilotModal() {
       setSessionStart(Date.now())
       setShowBriefPanel(false)
       setStatus('Loading company context...')
-      await fetchKnowledge(company)
+      await fetchKnowledge()
       setStatus('')
     }
 
@@ -357,10 +361,10 @@ export function CopilotModal() {
         body: JSON.stringify({
           company,
           meetingId,
-          meetingType: brief.meetingType || 'General',
+          meetingType: 'General',
           clientName: 'Unknown',
           clientCompany: brief.clientCompany || 'Unknown',
-          meetingGoal: brief.meetingGoal || '',
+          meetingGoal: 'Close the deal',
           duration,
           topics: parsed.topics,
           actionItems: parsed.actionItems,
@@ -505,36 +509,19 @@ export function CopilotModal() {
               <p className="text-xs font-semibold text-slate-600">Mission Brief</p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-medium text-slate-500 mb-1">Meeting is for</label>
-                <select
-                  value={company}
-                  onChange={e => { setCompany(e.target.value); setCompanyError(false) }}
-                  disabled={companyLocked}
-                  className={`w-full text-xs border rounded-lg px-2 py-2 outline-none focus:border-slate-400 bg-white ${
-                    companyLocked ? 'opacity-50 cursor-not-allowed bg-slate-100' : 'border-slate-200'
-                  } ${companyError ? 'border-red-400' : ''}`}
-                >
-                  <option value="" disabled>Select a company...</option>
-                  <option value="codeupscale">CodeUpscale</option>
-                  <option value="ridgetheory">Ridge Theory</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-medium text-slate-500 mb-1">Meeting type</label>
-                <select
-                  value={brief.meetingType}
-                  onChange={e => updateBrief('meetingType', e.target.value)}
-                  className="w-full text-xs border border-slate-200 rounded-lg px-2 py-2 outline-none focus:border-slate-400 bg-white"
-                >
-                  <option value="" disabled>Select type...</option>
-                  <option value="Sales">Sales</option>
-                  <option value="Discovery Call">Discovery Call</option>
-                </select>
-              </div>
-            </div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Meeting is for</label>
+            <select
+              value={company}
+              onChange={e => { setCompany(e.target.value); setCompanyError(false) }}
+              disabled={companyLocked}
+              className={`w-full text-xs border rounded-lg px-2 py-2 outline-none focus:border-slate-400 bg-white ${
+                companyLocked ? 'opacity-50 cursor-not-allowed bg-slate-100' : 'border-slate-200'
+              } ${companyError ? 'border-red-400' : ''}`}
+            >
+              <option value="" disabled>Select a company...</option>
+              <option value="codeupscale">CodeUpscale</option>
+              <option value="ridgetheory">Ridge Theory</option>
+            </select>
             {companyError && (
               <p className="text-[11px] text-red-500 mt-1">Please select a company first</p>
             )}
@@ -548,24 +535,24 @@ export function CopilotModal() {
               className="w-full text-xs border border-slate-200 rounded-lg px-2 py-2 outline-none focus:border-slate-400 bg-white"
             />
 
-            <label className="block text-[11px] font-medium text-slate-500 mt-3 mb-1">Meeting goal</label>
+            <label className="block text-[11px] font-medium text-slate-500 mt-3 mb-1">Client website</label>
             <input
-              type="text"
-              value={brief.meetingGoal}
-              onChange={e => updateBrief('meetingGoal', e.target.value)}
-              placeholder="e.g. Close Q3 software deal"
+              type="url"
+              value={brief.clientWebsite}
+              onChange={e => updateBrief('clientWebsite', e.target.value)}
+              placeholder="https://echologistics.com"
               className="w-full text-xs border border-slate-200 rounded-lg px-2 py-2 outline-none focus:border-slate-400 bg-white"
             />
 
-            <label className="block text-[11px] font-medium text-slate-500 mt-3 mb-1">Background</label>
+            <label className="block text-[11px] font-medium text-slate-500 mt-3 mb-1">Prior conversations &amp; prep notes</label>
             <textarea
-              value={brief.background}
-              onChange={e => updateBrief('background', e.target.value.slice(0, 500))}
-              placeholder="Any context the AI should know about this client..."
-              rows={3}
+              value={brief.priorConversations}
+              onChange={e => updateBrief('priorConversations', e.target.value.slice(0, 2000))}
+              placeholder="LinkedIn DMs, email threads, past calls, rep notes — anything you already know about this client..."
+              rows={4}
               className="w-full resize-none text-xs border border-slate-200 rounded-lg px-2 py-2 outline-none focus:border-slate-400 bg-white"
             />
-            <p className="text-xs text-slate-400 mt-1">{brief.background.length} / 500</p>
+            <p className="text-xs text-slate-400 mt-1">{brief.priorConversations.length} / 2000</p>
           </div>
         )}
 
