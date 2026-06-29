@@ -189,13 +189,20 @@ export function CopilotModal() {
     try {
       const res = await fetch('/api/sheets/knowledge?company=all')
       const data = await res.json()
-      setKnowledge(data.knowledge || [])
+      const rows = data.knowledge || []
+      setKnowledge(rows)
+      return rows
     } catch (_) {
       setKnowledge([])
+      return []
     } finally {
       setKnowledgeLoading(false)
     }
   }, [])
+
+  useEffect(() => {
+    if (company) fetchKnowledge()
+  }, [company, fetchKnowledge])
 
   const handleMicClick = useCallback(async () => {
     if (isRecording) {
@@ -214,6 +221,9 @@ export function CopilotModal() {
       hasRecordedRef.current = true
       setSessionStart(Date.now())
       setShowBriefPanel(false)
+    }
+
+    if (!knowledge.length && !knowledgeLoading) {
       setStatus('Loading company context...')
       await fetchKnowledge()
       setStatus('')
@@ -238,7 +248,15 @@ export function CopilotModal() {
 
     setIsProcessing(true)
     setError(null)
-    setStatus('Generating suggestions...')
+
+    let activeKnowledge = knowledge
+    if (!activeKnowledge.length && company) {
+      setStatus('Loading company context...')
+      activeKnowledge = await fetchKnowledge()
+      setStatus('Generating suggestions...')
+    } else {
+      setStatus('Generating suggestions...')
+    }
 
     const turnId = Date.now()
     const fullContext = mergeConsecutiveUtterances(meetingUtterancesRef.current, partialTranscript)
@@ -266,7 +284,7 @@ export function CopilotModal() {
           meetingTranscriptFromStart,
           history,
           speakerMap,
-          knowledge,
+          knowledge: activeKnowledge,
           brief,
           company,
         }),

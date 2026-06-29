@@ -20,8 +20,24 @@ function parseSections(text) {
   return sections.filter(s => s.heading.toLowerCase() !== 'why it works')
 }
 
+const SECTION_DISPLAY_ORDER = [
+  'say this next',
+  "what they're asking",
+  'good to know',
+  'follow-up',
+]
+
+function sortSections(sections) {
+  const rank = new Map(SECTION_DISPLAY_ORDER.map((label, index) => [label, index]))
+  return [...sections].sort((a, b) => {
+    const aRank = rank.get(a.heading.toLowerCase()) ?? 99
+    const bRank = rank.get(b.heading.toLowerCase()) ?? 99
+    return aRank - bRank
+  })
+}
+
 export function SuggestionCard({ text, isStreaming }) {
-  const sections = useMemo(() => parseSections(text), [text])
+  const sections = useMemo(() => sortSections(parseSections(text)), [text])
   if (!text) return null
   return (
     <div className="rounded-xl border p-3 bg-green-50 border-green-200 animate-slide-up">

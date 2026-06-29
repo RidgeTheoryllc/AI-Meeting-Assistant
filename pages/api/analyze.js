@@ -311,41 +311,57 @@ Apply the matching tone from HOW TO USE COMPANY KNOWLEDGE (rule 8) for this meet
 function buildResponseFormatSection() {
   return `COACHING RESPONSE FORMAT
 
-You are a silent real-time sales meeting coach for a software and web development agency.
+You are a silent real-time meeting copilot for a software and web development agency. You sit in the boss's ear.
 
-**Who we are:** We build custom software and redesign/develop websites for other companies. We are the vendor; the company on the other side of the call is the client (prospect or buyer). Our job in every meeting is to win their project.
+**Who we are:** We build custom software and redesign/develop websites for other companies. We are the vendor; the company on the other side of the call is the client (prospect or buyer).
 
-**Who is on the call:** "You" is our salesperson (our side). "Client" is the prospect company. Coach You on what to say to win the deal.
+**Who is on the call:** "You" is our boss (our side, the person you are coaching). "Client" is the prospect company. Coach You on what to say next.
 
-**Goal:** Move toward a signed SOW — learn their stack and pain when needed, handle objections, state price when asked, and close when they're ready.
+**Your job:** Feed the boss the SHARP, TECHNICAL answer she may not know, grounded in what the client just said. Move the deal forward — learn their stack when needed, handle objections, state price when asked, and close when they're ready.
 When client agrees to receive a proposal ("send it", "if the numbers work"), switch to CLOSE MODE — confirm deliverable, timeline, recipients, and next meeting.
 
-**One evolving proposal:** This meeting builds ONE solution — a single platform or project scope that grows turn by turn. Read the full transcript, infer what we've already proposed, and EXTEND that thread. Never restart with an unrelated product.
-Do NOT invent pain points. Reference past work ONLY as portfolio proof ("we built X for [past client]") after the client has described their situation — never as the prospect's stated needs.
+**One evolving proposal:** This meeting builds ONE solution that grows turn by turn. Read the full transcript, infer what we've already proposed, and EXTEND that thread. Never restart with an unrelated product.
+Do NOT invent pain points. Reference past work ONLY as portfolio proof ("we built X for [past client]") and ONLY when the client asks about experience, past work, credibility, or pricing comparables — never unprompted, never as the prospect's own systems.
 
-**Portfolio rule:** Cite spreadsheet clients as past work we delivered. Never describe them as the prospect's systems unless the client or prep notes said so.
+**ANSWER THE QUESTION, DON'T NAME-DROP:** When the client asks a technical "how / can you / what about" question (scaling, integration, security, data, architecture), the answer is the ARCHITECTURE — concrete technologies and how they fit together. Do NOT answer a technical question by naming a past client; that is the #1 failure to avoid. Only name a past client when the client explicitly asks about experience / past work / credibility, or when you are anchoring a price.
+
+**Be technical and specific:** Name real technologies, stacks, protocols, and architectures by name (e.g. "REST/GraphQL API", "OAuth2 SSO", "Postgres + S3 object storage", "OCR + field extraction", "webhook-based sync", "role-based access control", "CI/CD pipeline", "ELD/HOS compliance", "HL7/FHIR", "PCI-DSS"). Every sentence must carry a concrete fact — a technology, a number, a module name, a date, or a next step. No vague capability claims.
+
+Rewrite hedges into concrete answers:
+- Client: "How would your architecture scale to millions of documents?"
+  BAD: "We built a secure web app for [Client]." / "Our architecture can be tailored to scale."
+  GOOD: "Store the files in S3 object storage, index metadata in Postgres, and serve through a CDN — that scales to millions without slowing the UI. Heavy reads go through a Redis cache."
+- Client: "Can it find inconsistencies between documents automatically?"
+  BAD: "Our platform can be tailored to include automated checks, ensuring data integrity."
+  GOOD: "Run OCR to extract fields from each doc, then a rules engine cross-checks appraisal value, title, and borrower financials and flags mismatches for review."
+- Client: "How would you integrate without disrupting our workflows?"
+  BAD: "Our platform is designed with integration in mind."
+  GOOD: "Integrate over REST APIs and webhooks into your LOS, accounting system, and SharePoint — read/write in the background, no rip-and-replace."
+
 **Company knowledge:** When asked what you know about the prospect, use MEETING BRIEF prep notes and website first — max 2 short speakable sentences.
-**Industry experience:** When asked if you've worked in their industry, name 2-3 ALLOWED past clients max with natural descriptions — required, not optional.
+**Industry experience:** When asked if you've worked in their industry, name 2-3 ALLOWED past clients max with natural descriptions — required only on those turns.
 
-Provide your coaching using these sections. Omit any section that is not needed for this exchange — do not pad with empty sections.
+Provide your coaching using these exact section headings, in this order. Omit any section that is not needed for this exchange — do not pad with empty sections.
 
-**💡 What they're asking:**
-  [What the client actually wants to know — plain English, 1-2 sentences max]
+**Say this next:** [The exact words the boss reads aloud — her voice, natural, confident, blunt. 1-3 short sentences. First word is the answer (the term, number, module, or date) — never restate the client's question. No preamble, no "Yes —", no "Our platform can be designed to…".]
 
-**🎯 Say this:**
-  [Exact suggested response your boss can say out loud — written in her voice, natural, confident. Must end with one sharp follow-up question that moves the conversation forward.]
+**What they're asking:** [What the client actually wants to know — plain English, 1 sentence.]
 
-**📖 Good to know:**
-  [Only include if there's genuinely useful context — a relevant fact, industry term, or background info she might not know. Skip this section if not needed.]
+**Good to know:** [Optional. One technical term, fact, or piece of context the boss may not know but should — define it in one plain sentence so she sounds informed. Skip if there is nothing genuinely useful.]
 
-A response with just "What they're asking" and "Say this" is perfectly fine.
+**Follow-up:** [One sharp question that moves the conversation forward. Skip if a question already lives naturally in Say this next.]
 
-Banned in **🎯 Say this:** — never write these:
+A response with just "Say this next" and "What they're asking" is perfectly fine.
+
+Banned in **Say this next:** — never write these:
+- Question-echoing openers: "Yes, our platform can be designed to…", "Yes — we can…", "To answer your question…", "What you're asking is…"
 - Empathy filler: "I understand", "Great question", "That makes sense", "Absolutely"
+- Vague capability hedges: "can be designed to", "is designed to", "can be tailored to", "helps you", "ensures", "our approach"
 - Database voice: "According to our records", "Our records show"
 - Refusals: "I can't provide details about your company"
 - Raw spreadsheet scope labels copied verbatim (e.g. "Web Design, Web Application, Software Development for...")
-- Truncated or mid-sentence project descriptions`
+- Truncated or mid-sentence project descriptions
+- Naming a past client when the client did NOT ask about experience, past work, or a price comparable`
 }
 
 function buildAnalyzeSystemPrompt({ company, brief, knowledge = [], contextText = '' }) {
@@ -381,6 +397,8 @@ function clientAskedDistinctQuestion(intent = {}) {
     || intent.askingProcess
     || intent.askingDeadline
     || intent.portfolioObjection
+    || intent.askingTechnicalHow
+    || intent.askingSecurityCompliance
   )
 }
 
@@ -428,24 +446,33 @@ function collectSanitizeOptions(knowledge, brief, contextText, fullTranscriptTex
     .map(h => h.content || '')
     .join('\n')
   const priorCited = extractCitedClientNames(priorCoachingText, allowedNames)
-  const truckingTurn = clientIntent.askingIndustryExperience
+  const needsIndustryPortfolio = !clientIntent.askingTechnicalHow
+    && !clientIntent.askingSecurityCompliance
+    && (clientIntent.askingIndustryExperience
     || clientIntent.askingPortfolioNames
     || clientIntent.askingPortfolioDetails
-    || (clientIntent.askingCredibility && clientIntent.logisticsContext)
-  const portfolioProjects = truckingTurn
+    || clientIntent.portfolioObjection
+    || (clientIntent.askingCredibility && !clientIntent.askingTechnicalHow))
+  const truckingTurn = needsIndustryPortfolio
+    && clientIntent.logisticsContext
+    && !clientIntent.portfolioObjection
+  const portfolioProjects = needsIndustryPortfolio
     ? pickPortfolioProjects(knowledge, {
       limit: clientIntent.askingPortfolioNames ? 3 : 2,
       excludeNames: clientIntent.askingPortfolioNames ? priorCited : [],
-      truckingOnly: true,
+      truckingOnly: truckingTurn,
       citedNames: clientIntent.askingPortfolioDetails ? priorCited : [],
+      contextText,
+      brief,
+      preferRelevant: !truckingTurn,
     })
-    : relevant
+    : []
   const sheetPrices = getAllowedSheetPrices(knowledge, relevant, `${contextText}\n${fullTranscriptText}`)
   const clientStatedPrices = extractClientStatedPrices(fullTranscriptText)
   const factContext = buildProspectFactContext(fullTranscriptText, brief)
 
   return {
-    allowPricing: Boolean(clientIntent.askingPrice || clientIntent.clientStatedBudget),
+    allowPricing: Boolean(clientIntent.askingPrice),
     allowPriceRepeat: Boolean(clientIntent.askingPrice),
     allowDeadlineRepeat: Boolean(clientIntent.askingDeadline && !clientIntent.alreadyStatedDeadlinePitch),
     askingTrust: Boolean(clientIntent.askingTrust),
@@ -462,6 +489,7 @@ function collectSanitizeOptions(knowledge, brief, contextText, fullTranscriptTex
     clientStatedPrices,
     history,
     meetingContext: contextText,
+    latestClientText: clientIntent.latestClientText || '',
     intent: clientIntent,
     websiteSnippet: brief?.websiteSnippet || '',
     priorConversations: brief?.priorConversations || '',
@@ -530,9 +558,9 @@ export default async function handler(req, res) {
 
 Latest exchange since last coaching (You + Client):\n${latestExchangeText}${buildRecentCoaching(history, clientIntent)}${intentGuidance}
 
-Coach the salesperson (You) on what to say next. Answer ONLY what is NEW in the client's latest message.
-Use the coaching response format from the system prompt. Omit empty sections.
-In **🎯 Say this:** write natural, confident speech — never copy raw knowledge-base text. Cite at most 2-3 relevant past clients when asked about experience. Never describe portfolio names as the prospect's systems unless they said so in the transcript or brief.`,
+Coach the boss (You) on what to say next. Answer ONLY what is NEW in the client's latest message.
+Use the coaching response format and exact section headings from the system prompt. Omit empty sections.
+In **Say this next:** write natural, confident, technical speech — never copy raw knowledge-base text, never restate the client's question. Only name past clients when the client asked about experience, past work, or a price comparable (at most 2-3). Never describe portfolio names as the prospect's systems unless they said so in the transcript or brief.`,
     },
   ]
 
